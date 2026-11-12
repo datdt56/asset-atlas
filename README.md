@@ -31,7 +31,7 @@ Read sheets → find headers → exact/fuzzy column mapping → parse values →
 1. **Read:** SheetJS reads every sheet and preserves the original cell text, sheet name and row number. Column order does not matter.
 2. **Find headers:** scan the first 50 rows and choose the row with the most distinct recognized fields. Titles, empty rows, repeated headers and totals are handled separately. When there is no evidence, ask the user to choose a header row.
 3. **Map columns:** normalize Unicode, case, punctuation and spacing. Try the small alias dictionary first (`Make` → manufacturer, `S/N` → serial). Then use **Fuzzball.js** `ratio()` for typos such as `Manufaturer` and `Memroy`. Rank by canonical field, requiring a score of at least 82/100 and a lead of 10 points over the next field. These are conservative working thresholds tested on fixtures, not statistical confidence estimates. Unknown short acronyms stay unresolved.
-4. **Parse values:** take explicit columns first, then use regular expressions for common combined specifications. Recognize CPU patterns, RAM, drive counts/media and explicit screen dimensions. Normalize RAM to GB; `16384 MB`, `16 gig`, and `16GB` become `16 GB`. A lone unlabeled capacity is flagged instead of automatically becoming RAM.
+4. **Parse values:** take explicit columns first, then use regular expressions for common combined specifications. Recognize CPU patterns, RAM, drive counts/media and explicit screen dimensions. Normalize RAM to GB; `16384 MB`, `16 gig`, and `16GB` become `16 GB`. A lone unlabeled capacity is flagged instead of automatically becoming RAM. Explicit `RAM`/`SSD` labels take priority over position. Bare numeric RAM is preserved unless the header supplies a unit, such as `RAM (GB)`.
 5. **Review:** inspect source cells, edit extracted values, fix column mappings, choose header rows or exclude sheets. Unknown manufacturers in explicit columns are preserved verbatim; a short brand/product dictionary is used only to infer information from combined descriptions.
 6. **Export:** download the filtered inventory as CSV or JSON. CSV includes the eight core fields and source sheet/row; JSON also contains original cells, inferred-field flags and warnings. CSV formula prefixes are escaped.
 
@@ -41,15 +41,27 @@ Multiple columns assigned to a singleton field such as serial number require cor
 
 ## Structure
 
-| File                     | Responsibility                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| `src/extract.ts`         | Workbook reading, asset types, value parsing, normalization, warnings and CSV output |
-| `src/mapping/fields.ts`  | Small field-alias dictionary and administrative headers                              |
-| `src/mapping/resolve.ts` | Header normalization, library-based fuzzy matching and duplicate-mapping checks      |
-| `src/main.tsx`           | Upload, mapping repair, inventory, source inspection and editing                     |
-| `src/style.css`          | Responsive styling                                                                   |
+| File                     | Responsibility                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| `src/extract.ts`         | Workbook reading, row assembly, source tracking, warnings and CSV output        |
+| `src/parse.ts`           | Unit normalization, type classification and combined-description parsing        |
+| `src/mapping/fields.ts`  | Small field-alias dictionary and administrative headers                         |
+| `src/mapping/resolve.ts` | Header normalization, library-based fuzzy matching and duplicate-mapping checks |
+| `src/main.tsx`           | Upload, mapping repair, inventory, source inspection and editing                |
+| `src/style.css`          | Responsive styling                                                              |
 
 SheetJS handles spreadsheet formats. Fuzzball.js handles spelling similarity. The application adds the domain rules needed to interpret computer specifications; it does not implement its own string-distance algorithm.
+
+## Small parsing functions
+
+- `normalizeMemory(value, headerUnit)`: converts a known capacity to GB; never decides whether it is RAM or storage.
+- `normalizeScreen(value)`: normalizes inch values and preserves other units.
+- `classifyAssetType(text)`: finds a matching type rule from a short table.
+- `parseDescription(text, explicit)`: returns parsed fields and warnings without changing the source record.
+- `extractRow(...)`: reads explicit columns and fills only missing fields from the parsed description.
+- `extract(sheets)`: skips non-data rows, assembles assets and updates review warnings.
+
+CPU patterns are listed separately by processor family. Capacity parsing uses named regex groups and readable labels (`ram`, `storage`, `unknown`) rather than numeric capture indices throughout the extraction loop. These remain domain heuristics; smaller functions do not guarantee universal extraction.
 
 ## Validation
 

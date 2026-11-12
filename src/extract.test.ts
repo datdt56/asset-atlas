@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { readWorkbook, extract, memory, toCSV, reviewAssets } from "./extract";
+import { readWorkbook, extract, toCSV, reviewAssets } from "./extract";
+import { normalizeMemory, normalizeScreen, parseDescription } from "./parse";
 import { resolveHeaders } from "./mapping/resolve";
 import * as XLSX from "xlsx";
 const read = (f: string) => {
@@ -58,7 +59,7 @@ test("unseen aliases, repeated headers, duplicates and missing values", () => {
   assert.equal(a.length, 2);
   assert.equal(a[0].ram, "16 GB");
   assert(a.every((x) => x.warnings.includes("Duplicate serial number")));
-  assert.equal(memory("16 gig"), "16 GB");
+  assert.equal(normalizeMemory("16 gig"), "16 GB");
   assert(
     toCSV([{ ...a[0], model: '=HYPERLINK("bad")' }]).includes("'=HYPERLINK"),
   );
@@ -102,7 +103,7 @@ test("normalizes dedicated RAM before comparing it to description capacities", (
     ["DDR4 16 GB", "16 GB"],
     ["2x8GB", "16 GB"],
   ])
-    assert.equal(memory(input), expected);
+    assert.equal(normalizeMemory(input), expected);
 });
 
 test("leaves a lone unlabeled capacity ambiguous but handles explicitly labeled RAM", () => {
@@ -218,4 +219,60 @@ test("manufacturer text is treated literally when parsing a combined description
   );
   assert.equal(asset.manufacturer, "Custom [Co");
   assert.equal(asset.model, "Portable X");
+});
+
+test("normalization converts known units without assigning a unit to bare numbers", () => {
+  assert.equal(normalizeMemory("16"), "16");
+  assert.equal(normalizeMemory("DDR4"), "DDR4");
+  assert.equal(normalizeMemory("16384", "MB"), "16 GB");
+  assert.equal(normalizeScreen("35 cm"), "35 cm");
+  const [withUnit] = fromRows(["Model", "RAM (GB)"], ["Portable X", "16"]);
+  assert.equal(withUnit.ram, "16 GB");
+  const [withoutUnit] = fromRows(["Model", "RAM"], ["Portable X", "16"]);
+  assert.equal(withoutUnit.ram, "16");
+});
+
+test("explicit RAM/storage labels win regardless of order in a description", () => {
+  for (const description of [
+    "Portable X / 512GB / 16GB RAM",
+    "Portable X / RAM: 16GB / 512GB",
+    "Portable X / SSD 512GB / memory: 16GB",
+  ]) {
+    const parsed = parseDescription(description);
+    assert.equal(parsed.values.ram, "16 GB", description);
+    assert(parsed.values.storage?.includes("512 GB"), description);
+  }
+});
+
+test("explicit columns remain authoritative when a description differs", () => {
+  const [asset] = fromRows(
+    ["Model", "RAM", "Processor", "Description"],
+    [
+      "Portable X",
+      "32GB",
+      "i7-1185G7",
+      "Portable Y / i5-1135G7 / 16GB RAM / 512GB SSD",
+    ],
+  );
+  assert.equal(asset.model, "Portable X");
+  assert.equal(asset.ram, "32 GB");
+  assert.equal(asset.cpu, "i7-1185G7");
+  assert.equal(asset.storage, "512 GB SSD");
+});
+
+test("description inference does not treat an Intel CPU as the manufacturer", () => {
+  const parsed = parseDescription(
+    "Portable X / Intel Core i7-1185G7 / 16GB / 512GB SSD",
+  );
+  assert.equal(parsed.values.manufacturer, "");
+  assert.equal(parsed.values.cpu, "Intel Core i7-1185G7");
+});
+
+test("unitless explicit RAM does not become a duplicate storage capacity", () => {
+  const [asset] = fromRows(
+    ["Description", "RAM"],
+    ["Portable X / 16GB / 512GB SSD", "16"],
+  );
+  assert.equal(asset.ram, "16");
+  assert.equal(asset.storage, "512 GB SSD");
 });

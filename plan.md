@@ -34,7 +34,7 @@ The build is a static site. No custom string-distance algorithm is needed.
 
 ## Keep it simple
 
-Use the existing small modules: `extract.ts`, `mapping/fields.ts`,
+Use the existing small modules: `extract.ts`, `parse.ts`, `mapping/fields.ts`,
 `mapping/resolve.ts`, `main.tsx` and `style.css`. Prefer straightforward matching
 and a few documented domain rules over additional detection layers or services.
 
@@ -42,6 +42,16 @@ A field alias dictionary is expected domain knowledge, not a complete list of
 possible headers. Fuzzy matching handles spelling differences; manual mapping
 handles unfamiliar meanings. Brand dictionaries are only hints for descriptions,
 never a whitelist for explicit manufacturer values.
+
+## Simple function responsibilities
+
+- [x] `normalizeMemory`: only converts explicit units; bare numbers need a unit from the header.
+- [x] `normalizeScreen`: normalizes inches without relabeling centimetres.
+- [x] `classifyAssetType`: a small rule lookup rather than nested conditionals.
+- [x] `parseDescription`: parses combined specifications and returns values/warnings.
+- [x] `extractRow`: preserves explicit values and merges only missing parsed fields.
+- [x] `extract`: coordinates sheets and rows without embedding specification parsing.
+- [x] Prefer explicit RAM/storage labels before conventional positional inference.
 
 ## Before presenting
 
