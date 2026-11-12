@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fields } from "./asset-fields";
+import { assetTypes, fields } from "./asset-fields";
 import {
   AiRequest,
   validateAiResult,
@@ -88,6 +88,42 @@ test("validates original evidence and all IDs, independent of output ordering", 
   );
   assert.throws(() =>
     validateAiResult({ rows: [suggestion(), suggestion()] }, [input]),
+  );
+});
+
+test("AI type values use the canonical enum while unknown types remain null", () => {
+  const original = {
+    id: "typed-row",
+    cells: { Device: "a supplied device description" },
+  };
+  const result = (value: string | null) => ({
+    rows: [
+      {
+        ...suggestion(original.id),
+        fields: {
+          ...Object.fromEntries(fields.map((field) => [field, null])),
+          type:
+            value === null
+              ? null
+              : { value, sourceColumn: "Device", quote: "device" },
+        },
+      },
+    ],
+  });
+  for (const value of [...assetTypes, null]) {
+    assert.equal(
+      validateAiResult(result(value), [original]).rows[0].fields.type?.value ??
+        null,
+      value,
+    );
+  }
+  for (const value of ["laptop", "Notebook", "Unknown", ""]) {
+    assert.throws(() => validateAiResult(result(value), [original]));
+  }
+  assert.throws(() =>
+    validateAiResult({ rows: [{ id: original.id, fields: { type: null } }] }, [
+      original,
+    ]),
   );
 });
 

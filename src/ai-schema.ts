@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { fields, type Field } from "./asset-fields";
+import { assetTypes, fields } from "./asset-fields";
 export const AI_BATCH_SIZE = 20;
 export const AI_SELECTION_LIMIT = 100;
 export const AiInputRow = z
@@ -26,24 +26,28 @@ export const AiRequest = z
     (input) => JSON.stringify(input).length <= 32000,
     "Selected cells exceed the request size limit. Choose fewer columns or rows.",
   );
-const Evidence = z
+const EvidenceValue = z
   .object({
     value: z.string().min(1).max(300),
     sourceColumn: z.string().min(1).max(200),
     quote: z.string().min(1).max(600),
   })
-  .strict()
-  .nullable();
+  .strict();
+const Evidence = EvidenceValue.nullable();
 export const AiSuggestion = z
   .object({
     id: z.string().min(1).max(160),
     fields: z
-      .object(
-        Object.fromEntries(fields.map((field) => [field, Evidence])) as Record<
-          Field,
-          typeof Evidence
-        >,
-      )
+      .object({
+        type: EvidenceValue.extend({ value: z.enum(assetTypes) }).nullable(),
+        manufacturer: Evidence,
+        model: Evidence,
+        serial: Evidence,
+        cpu: Evidence,
+        ram: Evidence,
+        storage: Evidence,
+        screen: Evidence,
+      })
       .strict(),
   })
   .strict();

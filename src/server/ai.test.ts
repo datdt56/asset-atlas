@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createAiHandler } from "./ai";
-import { fields } from "../src/asset-fields";
+import { assetTypes, fields } from "../asset-fields";
 const url = "https://assets.example/api/ai-extract";
 const rows = [{ id: "row-1", cells: { Hardware: "16GB RAM / 512GB SSD" } }];
 const key = "test-only-not-a-real-key";
@@ -55,23 +55,32 @@ test("missing key returns an actionable fallback without contacting OpenAI", asy
   const handler = createAiHandler(async () => {
     throw Error("Must not call");
   });
-  const result = await handler(request(), {}, true);
+  const result = await handler(request(), {}, "test-user");
   assert.equal(result.status, 503);
   assert((await result.json()).error.includes("OPENAI_API_KEY"));
 });
 
-test("requires trusted hosted identity, same origin, POST and bounded JSON", async () => {
+test("requires a verified user identity, same origin, POST and bounded JSON", async () => {
   const handler = createAiHandler();
   assert.equal((await handler(request(), {})).status, 401);
   assert.equal(
-    (await handler(request({}, { Origin: "https://evil.example" }), {}, true))
-      .status,
+    (
+      await handler(
+        request({}, { Origin: "https://evil.example" }),
+        {},
+        "test-user",
+      )
+    ).status,
     403,
   );
-  assert.equal((await handler(new Request(url), {}, true)).status, 405);
-  assert.equal((await handler(request({ rows: [] }), {}, true)).status, 400);
+  assert.equal((await handler(new Request(url), {}, "test-user")).status, 405);
   assert.equal(
-    (await handler(request({ rows, other: "unexpected" }), {}, true)).status,
+    (await handler(request({ rows: [] }), {}, "test-user")).status,
+    400,
+  );
+  assert.equal(
+    (await handler(request({ rows, other: "unexpected" }), {}, "test-user"))
+      .status,
     400,
   );
   assert.equal(
@@ -83,10 +92,35 @@ test("requires trusted hosted identity, same origin, POST and bounded JSON", asy
           body: " ".repeat(65537),
         }),
         {},
-        true,
+        "test-user",
       )
     ).status,
     413,
+  );
+});
+
+test("origin checks use the public host behind Next.js and an HTTPS proxy", async () => {
+  const handler = createAiHandler();
+  const makeRequest = (origin: string) =>
+    new Request("http://localhost:3000/api/ai-extract", {
+      method: "POST",
+      headers: {
+        Host: "assets.example",
+        "X-Forwarded-Proto": "https",
+        Origin: origin,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ rows }),
+    });
+  assert.equal(
+    (await handler(makeRequest("https://assets.example"), {}, "test-user"))
+      .status,
+    503,
+  );
+  assert.equal(
+    (await handler(makeRequest("https://evil.example"), {}, "test-user"))
+      .status,
+    403,
   );
 });
 
@@ -102,10 +136,18 @@ test("SDK sends strict structured output, bounded tokens, no storage and no retr
     assert.equal(body.text.format.type, "json_schema");
     assert.equal(body.text.format.strict, true);
     assert(body.input[0].content.includes("untrusted data"));
+    assert(body.input[0].content.includes(JSON.stringify(assetTypes)));
+    const fieldSchema =
+      body.text.format.schema.properties.rows.items.properties.fields;
+    assert.deepEqual(fieldSchema.required, [...fields]);
+    assert.deepEqual(
+      fieldSchema.properties.type.anyOf[0].properties.value.enum,
+      [...assetTypes],
+    );
     assert.deepEqual(JSON.parse(body.input[1].content), { rows });
     return response();
   }) as typeof fetch);
-  const result = await handler(request(), { OPENAI_API_KEY: key }, true);
+  const result = await handler(request(), { OPENAI_API_KEY: key }, "test-user");
   assert.equal(result.status, 200);
   assert.equal((await result.json()).result.rows[0].fields.ram.value, "16 GB");
   assert.equal(count, 1);
@@ -129,7 +171,7 @@ test("validates evidence and IDs even when the provider returns schema-shaped da
   ]) {
     const handler = createAiHandler(async () => response(data));
     assert.equal(
-      (await handler(request(), { OPENAI_API_KEY: key }, true)).status,
+      (await handler(request(), { OPENAI_API_KEY: key }, "test-user")).status,
       502,
     );
   }
@@ -157,7 +199,11 @@ test("provider errors and incomplete/refused output preserve the local fallback 
       count++;
       return mock();
     }) as typeof fetch);
-    const result = await handler(request(), { OPENAI_API_KEY: key }, true);
+    const result = await handler(
+      request(),
+      { OPENAI_API_KEY: key },
+      "test-user",
+    );
     assert.equal(result.status, 502);
     assert(!(await result.text()).includes(key));
     assert.equal(count, 1);
@@ -168,11 +214,11 @@ test("rate limits paid requests per identity", async () => {
   const handler = createAiHandler(async () => response());
   for (let i = 0; i < 10; i++)
     assert.equal(
-      (await handler(request(), { OPENAI_API_KEY: key }, true)).status,
+      (await handler(request(), { OPENAI_API_KEY: key }, "test-user")).status,
       200,
     );
   assert.equal(
-    (await handler(request(), { OPENAI_API_KEY: key }, true)).status,
+    (await handler(request(), { OPENAI_API_KEY: key }, "test-user")).status,
     429,
   );
 });

@@ -4,30 +4,34 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/build-worker.mjs",
-    "test": "node --import tsx --test src/extract.test.ts src/mapping/resolve.test.ts src/ai.test.ts server/ai.test.ts",
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "test": "node --import tsx --test src/extract.test.ts src/mapping/resolve.test.ts src/ai.test.ts src/server/*.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "start": "node --import tsx scripts/serve.ts"
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "fuzzball": "^2.2.6",
     "lucide-react": "^0.468.0",
+    "next": "^16.4.6",
     "openai": "^6.49.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1",
     "xlsx": "^0.18.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "esbuild": "^0.25.12",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "prettier": "3.10.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.0"
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   }
 }

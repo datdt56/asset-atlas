@@ -9,6 +9,16 @@ export const fields = [
   "screen",
 ] as const;
 export type Field = (typeof fields)[number];
+export const assetTypes = [
+  "Laptop",
+  "Desktop",
+  "Server",
+  "Workstation",
+  "NAS",
+  "Monitor",
+  "Peripheral",
+  "Other",
+] as const;
 export type AssetValues = Record<Field, string>;
 export const fieldLabels: Record<Field, string> = {
   type: "Asset type",

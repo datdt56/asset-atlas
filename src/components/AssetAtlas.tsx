@@ -1,5 +1,6 @@
+"use client";
+
 import React, { useMemo, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
 import {
   Layers3,
   Upload,
@@ -28,14 +29,13 @@ import {
   type Asset,
   type Sheet,
   type Field,
-} from "./extract";
-import { resolveHeaders, checkConflicts } from "./mapping/resolve";
-import { fieldLabels as labels } from "./asset-fields";
-import { AI_SELECTION_LIMIT } from "./ai-schema";
-import { buildAiEdits } from "./ai";
-import { AiReview, type AiSelection } from "./components/AiReview";
-import "./style.css";
-function App() {
+} from "../extract";
+import { resolveHeaders, checkConflicts } from "../mapping/resolve";
+import { fieldLabels as labels } from "../asset-fields";
+import { AI_SELECTION_LIMIT } from "../ai-schema";
+import { buildAiEdits } from "../ai";
+import { AiReview, type AiSelection } from "./AiReview";
+export default function AssetAtlas() {
   const [sheets, setSheets] = useState<Sheet[]>([]),
     [filename, setFilename] = useState(""),
     [busy, setBusy] = useState(false),
@@ -834,4 +834,3 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
