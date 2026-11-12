@@ -28,16 +28,16 @@ export const aliases: Record<TargetField, string[]> = {
   ],
 };
 
-export const descriptions: Record<TargetField, string> = {
-  type: "Device category or asset type: laptop, desktop, server, monitor",
-  manufacturer: "Manufacturer, make, vendor or brand of equipment",
-  model: "Product model name or model number of the device",
-  serial:
-    "Unique manufacturer serial number, S/N or service tag; not an internal asset tag",
-  cpu: "CPU, processor model, Intel Core, AMD Ryzen or Apple silicon",
-  ram: "Installed system RAM or physical memory capacity in GB; not disk space",
-  storage: "Disk storage or drive capacity: SSD, HDD, NVMe; not system RAM",
-  screen: "Screen or display diagonal size in inches",
-  description:
-    "Combined equipment description or specifications containing model, CPU, RAM and disk",
-};
+// These columns are retained in the source details, but aren't asset specifications.
+export const ignoredHeaders = [
+  "asset tag",
+  "cost centre",
+  "cost center",
+  "purchased",
+  "purchase date",
+  "notes",
+  "assigned to",
+  "location",
+  "owner",
+  "department",
+];

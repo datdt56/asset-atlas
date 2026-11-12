@@ -1,1 +1,1 @@
-{"root":["./src/extract.test.ts","./src/extract.ts","./src/main.tsx","./src/mapping/cloud.ts","./src/mapping/fields.ts","./src/mapping/resolve.test.ts","./src/mapping/resolve.ts","./server/embeddings.test.ts","./server/embeddings.ts","./server/node-adapter.ts","./vite.config.ts"],"version":"5.9.3"}
+{"root":["./src/extract.test.ts","./src/extract.ts","./src/main.tsx","./src/mapping/fields.ts","./src/mapping/resolve.test.ts","./src/mapping/resolve.ts","./vite.config.ts"],"version":"5.9.3"}

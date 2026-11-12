@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Layers3,
@@ -20,22 +20,15 @@ import {
 } from "lucide-react";
 import {
   extract,
+  reviewAssets,
   fields,
-  mapHeaders,
   readWorkbook,
   toCSV,
   type Asset,
   type Sheet,
   type Field,
 } from "./extract";
-import {
-  resolveHeaders,
-  decisionsToMapping,
-  checkConflicts,
-  applyEmbeddingResults,
-  type HeaderDecision,
-} from "./mapping/resolve";
-import { matchCloud } from "./mapping/cloud";
+import { resolveHeaders, checkConflicts } from "./mapping/resolve";
 import "./style.css";
 const labels: Record<Field, string> = {
   type: "Asset type",
@@ -55,123 +48,25 @@ function App() {
     [query, setQuery] = useState(""),
     [tab, setTab] = useState("All assets"),
     [mapping, setMapping] = useState(false),
-    [selected, setSelected] = useState<Asset | null>(null),
+    [selectedId, setSelectedId] = useState<string | null>(null),
     [edits, setEdits] = useState<Record<string, Partial<Asset>>>({}),
     [drag, setDrag] = useState(false),
     [menu, setMenu] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const [cloudMessages, setCloudMessages] = useState<Record<string, string>>(
-    {},
-  );
-  const [cloudRetry, setCloudRetry] = useState(0);
-  const importGeneration = useRef(0);
-  const attempted = useRef(new Set<string>());
-  const pendingSignature = JSON.stringify(
-    sheets.map((sheet) => ({
-      name: sheet.name,
-      header: sheet.header,
-      enabled: sheet.enabled,
-      confirmed: sheet.headerConfirmed,
-      pending: sheet.decisions
-        ?.filter(
-          (d) =>
-            d.status === "unresolved" &&
-            d.method !== "manual" &&
-            d.normalized.replace(/\s/g, "").length > 3 &&
-            d.original.length <= 160,
-        )
-        .map((d) => [d.columnIndex, d.original]),
-    })),
-  );
-  useEffect(() => {
-    const controller = new AbortController();
-    const generation = importGeneration.current;
-    const snapshot = JSON.parse(pendingSignature) as {
-      name: string;
-      header: number;
-      enabled: boolean;
-      confirmed: boolean;
-      pending: [number, string][];
-    }[];
-    const run = async () => {
-      // Process sheets sequentially to keep request volume small.
-      for (const sheet of snapshot) {
-        if (controller.signal.aborted) return;
-        if (!sheet.enabled || !sheet.confirmed || !sheet.pending?.length)
-          continue;
-        const requestKey = JSON.stringify([generation, sheet, cloudRetry]);
-        if (attempted.current.has(requestKey)) continue;
-        attempted.current.add(requestKey);
-        setCloudMessages((old) => ({
-          ...old,
-          [sheet.name]: "Checking unresolved headers with OpenAI…",
-        }));
-        try {
-          const updates: HeaderDecision[] = [];
-          for (let offset = 0; offset < sheet.pending.length; offset += 100) {
-            const batch = sheet.pending.slice(offset, offset + 100);
-            const results = await matchCloud(
-              batch.map(([, h]) => h),
-              controller.signal,
-            );
-            updates.push(
-              ...results.map((d, i) => ({ ...d, columnIndex: batch[i][0] })),
-            );
-          }
-          if (
-            controller.signal.aborted ||
-            generation !== importGeneration.current
-          )
-            return;
-          setSheets((current) =>
-            current.map((s) => {
-              if (s.name !== sheet.name || s.header !== sheet.header) return s;
-              const decisions = applyEmbeddingResults(
-                s.decisions || [],
-                updates,
-              );
-              return {
-                ...s,
-                decisions,
-                mapping: decisionsToMapping(decisions),
-              };
-            }),
-          );
-          setCloudMessages((old) => ({
-            ...old,
-            [sheet.name]:
-              "Cloud matching complete. Review semantic suggestions and any unresolved columns.",
-          }));
-        } catch (error) {
-          if (controller.signal.aborted) {
-            attempted.current.delete(requestKey);
-            return;
-          }
-          setCloudMessages((old) => ({
-            ...old,
-            [sheet.name]:
-              error instanceof Error
-                ? error.message
-                : "Cloud matching failed. Map manually.",
-          }));
-        }
-      }
-    };
-    void run();
-    return () => controller.abort();
-  }, [pendingSignature, cloudRetry]);
   const unresolvedCount = sheets
     .filter((s) => s.enabled)
     .reduce(
       (n, s) =>
-        n + (s.decisions?.filter((d) => d.status === "unresolved").length || 0),
+        n + (s.decisions.filter((d) => d.status === "unresolved").length || 0),
       0,
     );
 
+  const extracted = useMemo(() => extract(sheets), [sheets]);
   const assets = useMemo(
-    () => extract(sheets).map((a) => ({ ...a, ...edits[a.id] })),
-    [sheets, edits],
+    () => reviewAssets(extracted.map((a) => ({ ...a, ...edits[a.id] }))),
+    [extracted, edits],
   );
+  const selected = assets.find((asset) => asset.id === selectedId) || null;
   const review = assets.filter((a) => a.warnings.length);
   const visible = assets.filter(
     (a) =>
@@ -194,9 +89,6 @@ function App() {
       const data = readWorkbook(await file.arrayBuffer());
       if (!data.some((s) => s.rows.length))
         throw Error("The file contains no readable rows.");
-      importGeneration.current++;
-      attempted.current.clear();
-      setCloudMessages({});
       setSheets(data);
       setFilename(file.name);
       setEdits({});
@@ -205,10 +97,10 @@ function App() {
         data.some(
           (s) =>
             !s.headerConfirmed ||
-            s.decisions?.some((d) => d.status === "unresolved"),
+            s.decisions.some((d) => d.status === "unresolved"),
         ),
       );
-      setSelected(null);
+      setSelectedId(null);
     } catch (e) {
       setError(
         e instanceof Error
@@ -260,7 +152,7 @@ function App() {
       return;
     setSheets((s) => s.map((v, i) => (i === index ? { ...v, ...value } : v)));
     setEdits({});
-    setSelected(null);
+    setSelectedId(null);
   };
   const manualMap = (
     sheetIndex: number,
@@ -268,9 +160,7 @@ function App() {
     value: string,
   ) => {
     const sheet = sheets[sheetIndex];
-    const decisions = (
-      sheet.decisions || resolveHeaders(sheet.rows[sheet.header] || [])
-    ).map((d) =>
+    const decisions = sheet.decisions.map((d) =>
       d.columnIndex !== columnIndex
         ? d
         : {
@@ -290,10 +180,7 @@ function App() {
           },
     );
     const checked = checkConflicts(decisions);
-    patch(sheetIndex, {
-      decisions: checked,
-      mapping: decisionsToMapping(checked),
-    });
+    patch(sheetIndex, { decisions: checked });
   };
   return (
     <div className="app">
@@ -305,32 +192,18 @@ function App() {
           asset<span className="brand-light">atlas</span>
           <span className="beta">BETA</span>
         </a>
-        <div className="workspace">
-          <span className="avatar">W</span>
-          <div>
-            My workspace<small>Personal workspace</small>
-          </div>
-          <ChevronDown size={15} />
-        </div>
         <p className="nav-label">WORKSPACE</p>
-        <button className="nav active">
+        <div className="nav active">
           <Layers3 size={18} /> Asset inventory <span className="nav-dot" />
-        </button>
+        </div>
         <div className="aside-bottom">
           <div className="privacy">
             <ShieldCheck size={20} />
             <strong>Asset rows stay local</strong>
             <p>
-              Asset rows stay in your browser. Unresolved header names are sent
-              to OpenAI for optional cloud matching.
+              Spreadsheets are processed in your browser. Files and asset data
+              stay on this device.
             </p>
-          </div>
-          <div className="profile">
-            <span className="avatar profile-avatar">YO</span>
-            <div>
-              Your workspace<small>Local session</small>
-            </div>
-            <span className="online" />
           </div>
         </div>
       </aside>
@@ -340,7 +213,7 @@ function App() {
             Workspace <span className="slash">/</span> <b>Asset inventory</b>
           </span>
           <span className="local">
-            <span /> Local extraction · Cloud header matching
+            <span /> Local processing
           </span>
         </header>
         <div className="content">
@@ -557,7 +430,6 @@ function App() {
                           onChange={(e) =>
                             patch(i, {
                               header: +e.target.value,
-                              mapping: mapHeaders(s.rows[+e.target.value]),
                               decisions: resolveHeaders(
                                 s.rows[+e.target.value],
                               ),
@@ -565,7 +437,7 @@ function App() {
                             })
                           }
                         >
-                          {s.rows.slice(0, 50).map((r, j) => (
+                          {s.rows.map((r, j) => (
                             <option key={j} value={j}>
                               {j + 1} · {r.slice(0, 3).join(" / ").slice(0, 75)}
                             </option>
@@ -581,28 +453,15 @@ function App() {
                         Use row {s.header + 1} as headers
                       </button>
                     )}
-                    <p role="status">
-                      {cloudMessages[s.name] ||
-                        "Exact aliases and conservative fuzzy matching applied."}
-                    </p>
-                    <button
-                      className="secondary"
-                      onClick={() => {
-                        attempted.current.clear();
-                        setCloudRetry((n) => n + 1);
-                      }}
-                    >
-                      Retry cloud matching
-                    </button>
                     <div className="map-fields">
                       {(s.rows[s.header] || []).map((h, j) => (
                         <label key={j}>
                           {h || `Column ${j + 1}`}
                           <select
                             value={
-                              s.decisions?.[j]?.status === "ignored"
+                              s.decisions[j]?.status === "ignored"
                                 ? "ignore"
-                                : s.decisions?.[j]?.status === "accepted"
+                                : s.decisions[j]?.status === "accepted"
                                   ? s.decisions[j].field || "unresolved"
                                   : "unresolved"
                             }
@@ -620,16 +479,16 @@ function App() {
                             ))}
                           </select>
                           <small className="mapping-reason">
-                            {s.decisions?.[j]?.reason}
+                            {s.decisions[j]?.reason}
                           </small>
                           <small>
-                            {s.decisions?.[j]?.method
+                            {s.decisions[j]?.method
                               ? `Method: ${s.decisions[j].method}`
                               : "Unresolved"}
                           </small>
-                          {s.decisions?.[j]?.candidates.map((c) => (
+                          {s.decisions[j]?.candidates.map((c) => (
                             <small key={c.field}>
-                              {c.field}: {c.score.toFixed(3)} ({c.method})
+                              {c.field}: {c.score.toFixed(3)} similarity
                             </small>
                           ))}
                           <small className="source-example">
@@ -723,10 +582,10 @@ function App() {
                       {visible.map((a) => (
                         <tr
                           key={a.id}
-                          onClick={() => setSelected(a)}
+                          onClick={() => setSelectedId(a.id)}
                           tabIndex={0}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") setSelected(a);
+                            if (e.key === "Enter") setSelectedId(a.id);
                           }}
                         >
                           <td>
@@ -791,7 +650,7 @@ function App() {
                 </div>
                 <div className="table-footer">
                   Showing {visible.length} of {assets.length} assets
-                  <span>Original rows preserved · No silent deletions</span>
+                  <span>Source cells retained for extracted assets</span>
                 </div>
               </>
             )}
@@ -805,7 +664,7 @@ function App() {
         </div>
       </main>
       {selected && (
-        <div className="overlay" onClick={() => setSelected(null)}>
+        <div className="overlay" onClick={() => setSelectedId(null)}>
           <section
             className="drawer"
             role="dialog"
@@ -815,7 +674,7 @@ function App() {
           >
             <button
               className="close"
-              onClick={() => setSelected(null)}
+              onClick={() => setSelectedId(null)}
               aria-label="Close asset"
             >
               <X />
@@ -840,10 +699,15 @@ function App() {
                     value={selected[f]}
                     onChange={(e) => {
                       const next = { ...selected, [f]: e.target.value };
-                      setSelected(next);
                       setEdits((old) => ({
                         ...old,
-                        [next.id]: { ...old[next.id], [f]: e.target.value },
+                        [next.id]: {
+                          ...old[next.id],
+                          [f]: e.target.value,
+                          inferred: selected.inferred.filter(
+                            (field) => field !== f,
+                          ),
+                        },
                       }));
                     }}
                   />
@@ -861,9 +725,9 @@ function App() {
             </dl>
             <p className="source">
               Edits are saved in this session and included in exports. Review
-              warnings describe the original extraction.
+              warnings update as you correct the data.
             </p>
-            <button className="primary" onClick={() => setSelected(null)}>
+            <button className="primary" onClick={() => setSelectedId(null)}>
               <Check size={16} /> Done reviewing
             </button>
           </section>
