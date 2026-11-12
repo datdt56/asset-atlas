@@ -276,3 +276,16 @@ test("unitless explicit RAM does not become a duplicate storage capacity", () =>
   assert.equal(asset.ram, "16");
   assert.equal(asset.storage, "512 GB SSD");
 });
+
+test("unmapped source rows remain available for optional AI review", () => {
+  const [asset] = fromRows(
+    ["Equipment details unknown"],
+    ["Framework Laptop 13 / Ryzen 7 / 32 GB"],
+  );
+  assert(asset);
+  assert.equal(asset.model, "");
+  assert.equal(
+    asset.raw["Equipment details unknown [1]"],
+    "Framework Laptop 13 / Ryzen 7 / 32 GB",
+  );
+});

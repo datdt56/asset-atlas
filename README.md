@@ -1,17 +1,26 @@
 # Asset Atlas
 
-A small React + TypeScript application that turns messy XLSX/CSV computer inventories into editable, searchable asset records. Files are processed in the browser. There is no backend, AI API, API key, or database.
+A React + TypeScript workbench for messy XLSX/CSV computer inventories. Local parsing runs immediately in the browser. Optional LLM assistance can interpret unfamiliar columns and combined specifications for rows you select.
 
-## Run
+## Run locally
 
-Requires Node 18.20+ (Node 20+ recommended).
+Requires Node 18.20+; Node 20+ recommended.
 
 ```sh
 npm install
+cp .env.example .env.local
+chmod 600 .env.local
 npm run dev
 ```
 
-Upload a spreadsheet, drop one onto the upload area, or choose **Try a sample spreadsheet**. Both supplied samples are included as demonstration data.
+Local parsing works without any key. To enable AI, put your own key in `.env.local` using your editor and restart the server:
+
+```dotenv
+OPENAI_API_KEY=replace-with-your-key
+LLM_MODEL=gpt-6-luna
+```
+
+The placeholder is deliberately unusable. `gpt-6-luna` is the default small model; `LLM_MODEL` is a server-only override and must support Structured Outputs and reasoning effort `none`. Model availability depends on your account. [Official model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
 ```sh
 npm test
@@ -20,68 +29,75 @@ npm run build
 npm start
 ```
 
-`npm start` serves the production build using Vite preview. Build output is a static `dist/` folder; deploy it to a static host. `.openai/hosting.json` points the existing private Site at this folder. No environment variables are required. Old local `.env.local` files, if present, are ignored and unused by application code; never use `VITE_*` variables for secrets.
+`npm start` serves the built frontend and API at `http://127.0.0.1:4173`. Both development and production-test adapters bind to loopback. Vite preview or a static-only host will not provide the AI endpoint.
 
-## One extraction pipeline
+## Local extraction
 
 ```text
-Read sheets → find headers → exact/fuzzy column mapping → parse values → review/export
+Read sheets → find headers → exact/fuzzy mapping → parse values → review/export
 ```
 
-1. **Read:** SheetJS reads every sheet and preserves the original cell text, sheet name and row number. Column order does not matter.
-2. **Find headers:** scan the first 50 rows and choose the row with the most distinct recognized fields. Titles, empty rows, repeated headers and totals are handled separately. When there is no evidence, ask the user to choose a header row.
-3. **Map columns:** normalize Unicode, case, punctuation and spacing. Try the small alias dictionary first (`Make` → manufacturer, `S/N` → serial). Then use **Fuzzball.js** `ratio()` for typos such as `Manufaturer` and `Memroy`. Rank by canonical field, requiring a score of at least 82/100 and a lead of 10 points over the next field. These are conservative working thresholds tested on fixtures, not statistical confidence estimates. Unknown short acronyms stay unresolved.
-4. **Parse values:** take explicit columns first, then use regular expressions for common combined specifications. Recognize CPU patterns, RAM, drive counts/media and explicit screen dimensions. Normalize RAM to GB; `16384 MB`, `16 gig`, and `16GB` become `16 GB`. A lone unlabeled capacity is flagged instead of automatically becoming RAM. Explicit `RAM`/`SSD` labels take priority over position. Bare numeric RAM is preserved unless the header supplies a unit, such as `RAM (GB)`.
-5. **Review:** inspect source cells, edit extracted values, fix column mappings, choose header rows or exclude sheets. Unknown manufacturers in explicit columns are preserved verbatim; a short brand/product dictionary is used only to infer information from combined descriptions.
-6. **Export:** download the filtered inventory as CSV or JSON. CSV includes the eight core fields and source sheet/row; JSON also contains original cells, inferred-field flags and warnings. CSV formula prefixes are escaped.
+SheetJS reads every sheet and preserves original cells and sheet/row references. Header detection scans the first 50 rows for distinct recognized fields. Exact aliases run first, then Fuzzball.js `ratio()` handles typos using a score of at least 82/100 and a 10-point lead over the runner-up. These are working thresholds, not confidence probabilities. Unknown short acronyms remain unresolved.
 
-Common administrative headers (location, notes, assignee, cost centre, asset tag) are ignored automatically but remain in source details. Unknown columns remain visibly unresolved. Exporting with unresolved columns asks for acknowledgement that those columns will be omitted.
+Explicit columns take priority. Small description rules recognize common CPU, capacity, drive-media, product-family and screen patterns. Explicit RAM/storage labels outrank positional inference. RAM units normalize to GB; bare numeric RAM remains unchanged unless the header supplies a unit. A lone unlabeled capacity stays ambiguous. Manufacturer/model columns accept arbitrary values; a short dictionary only helps infer brands and types from descriptions.
 
-Multiple columns assigned to a singleton field such as serial number require correction. Description/storage columns may be combined using `/`. Mapping changes reset asset edits after confirmation. Direct asset edits recompute missing-value and duplicate warnings; manually edited fields stop being marked as inferred. Refreshing the page clears session data.
+Review results in the inventory, inspect original cells, edit values, fix mappings, select header rows or exclude sheets. Unknown-column source rows remain visible even when local parsing extracts no core fields, so they can be inspected or selected for AI. Administrative-only rows without asset information are not promoted into assets. Duplicate and missing-value warnings update after edits.
 
-## Structure
+CSV/JSON export uses the current filter. CSV includes the eight fields and source sheet/row and escapes formula prefixes; JSON also includes original cells, inferred-field flags and warnings. Unknown columns require acknowledgement before exporting partial results. Multiple description/storage columns may be joined with `/`; conflicting singleton mappings require review. Refresh clears session data.
 
-| File                     | Responsibility                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------- |
-| `src/extract.ts`         | Workbook reading, row assembly, source tracking, warnings and CSV output        |
-| `src/parse.ts`           | Unit normalization, type classification and combined-description parsing        |
-| `src/mapping/fields.ts`  | Small field-alias dictionary and administrative headers                         |
-| `src/mapping/resolve.ts` | Header normalization, library-based fuzzy matching and duplicate-mapping checks |
-| `src/main.tsx`           | Upload, mapping repair, inventory, source inspection and editing                |
-| `src/style.css`          | Responsive styling                                                              |
+## Optional AI workflow
 
-SheetJS handles spreadsheet formats. Fuzzball.js handles spelling similarity. The application adds the domain rules needed to interpret computer specifications; it does not implement its own string-distance algorithm.
+1. Select rows using the table checkboxes (up to 100 per action).
+2. Click **AI review**.
+3. Choose columns and inspect the exact indexed cell payload. Unknown column names are supported. Known serial/administrative columns are excluded by default; unknown columns are included and may still contain personal or confidential data.
+4. Click **Send selected cells to AI**. Nothing is sent before this explicit action.
+5. Review proposed values next to current values and quoted source evidence.
+6. Choose field changes and click **Apply**. Close to discard them instead.
 
-## Small parsing functions
+The client deduplicates identical selected cells within an action, then sends sequential requests of up to 20 unique rows, also bounded by input size. IDs attach results to the correct source rows even if the provider reorders them. All batches are validated before the first paid call. A failure or cancellation keeps completed batches available for review and does not change local results.
 
-- `normalizeMemory(value, headerUnit)`: converts a known capacity to GB; never decides whether it is RAM or storage.
-- `normalizeScreen(value)`: normalizes inch values and preserves other units.
-- `classifyAssetType(text)`: finds a matching type rule from a short table.
-- `parseDescription(text, explicit)`: returns parsed fields and warnings without changing the source record.
-- `extractRow(...)`: reads explicit columns and fills only missing fields from the parsed description.
-- `extract(sheets)`: skips non-data rows, assembles assets and updates review warnings.
+Output uses one strict schema for type, manufacturer, model, serial, CPU, RAM, storage and screen size, with `null` for unavailable information. Each proposed field includes an exact source-column key and quoted substring. Both client and server validate schema, complete/unique row IDs and the existence of evidence. Evidence existence **does not prove the proposed interpretation is correct**; human review is required. Spreadsheet text is treated as data, never as instructions. No tools or product lookup are enabled. [Structured Outputs documentation](https://developers.openai.com/api/docs/guides/structured-outputs).
 
-CPU patterns are listed separately by processor family. Capacity parsing uses named regex groups and readable labels (`ram`, `storage`, `unknown`) rather than numeric capture indices throughout the extraction loop. These remain domain heuristics; smaller functions do not guarantee universal extraction.
+Empty or locally inferred fields are initially selected for review. Existing explicit-column values are unselected; you can deliberately select a replacement. Existing session edits (including previously applied suggestions) are protected. Nothing overwrites them automatically. Applying selected changes recomputes inventory warnings. Importing another file or changing mappings closes the review and cancels pending work.
 
-## Validation
+## API keys and production
 
-Tests cover both supplied files and a generated unseen multi-sheet workbook with moved, reordered and misspelled headers. They also cover combined server specifications, leading-zero serials, unfamiliar manufacturers, ambiguous capacities, duplicate serials, edits, peripheral detection, and CSV formula escaping.
+- Local keys belong only in Git-ignored `.env.local`. Commit `.env.example` placeholders only. Never put keys in source, chat, screenshots, browser storage, `VITE_*` / `NEXT_PUBLIC_*` variables, or `.openai/hosting.json`.
+- Production keys belong in the hosting provider's runtime secret store as `OPENAI_API_KEY`; set `LLM_MODEL` as a server runtime variable if needed. Use a dedicated restricted project key, usage monitoring and enforced spend controls. Rotate exposed credentials.
+- The frontend calls only `/api/ai-extract`. The official OpenAI SDK runs exclusively on the server. Zod defines request/result validation and generates the strict response schema.
+- API calls disable stored Responses (`store: false`), automatic SDK retries, and model reasoning. They have a 45-second timeout and an 8,000-output-token cap. Provider retention policies still apply; `store: false` is not a promise of zero retention or zero cost after cancellation.
+- Limits: 20 rows/request, 50 nonempty cells/row, 2,000 characters/cell, 32,000 JSON characters, and a 64 KB body. Oversized inputs are rejected, never silently truncated.
+- Hosted calls require the platform-injected `oai-authenticated-user-id`; local loopback mode does not. Preserve the private Site access policy. Do not directly expose the local adapter or trust this header on another host without a trusted authentication gateway.
+- Server limits are ten paid requests/minute per identity and two simultaneous requests per instance. These are in-memory limits, not global spend protection. A public scaled deployment needs shared authorization/rate limiting and budget enforcement. Browser selection limits alone are not security controls.
 
-Regression cases explicitly check that `ThinkCentre M720q` is not parsed as CPU `M7`, that dedicated RAM does not leak into storage, and that an unlabeled `512GB` is not asserted to be RAM. The tests verify field values as well as row counts. Browser interaction testing is separate from these automated checks.
+The build produces `dist/server/index.js`, a Cloudflare-compatible Worker with frontend assets embedded for the existing Sites deployment. The Worker reads secrets at runtime; the archive and client bundle contain no key. This project needs a server-capable deployment for AI. Missing keys return an actionable message while local parsing remains usable.
 
-## Tradeoffs and limits
+## Files
 
-The goal is a reliable, explainable challenge submission rather than universal spreadsheet understanding. The app handles common inventory variations and provides correction when evidence is insufficient.
+| File                                           | Responsibility                                                          |
+| ---------------------------------------------- | ----------------------------------------------------------------------- |
+| `src/asset-fields.ts`                          | Shared canonical fields and labels                                      |
+| `src/extract.ts`                               | Workbook reading, row assembly, source tracking, warnings and CSV       |
+| `src/parse.ts`                                 | Small local normalization and description helpers                       |
+| `src/mapping/`                                 | Header aliases and library-based typo matching                          |
+| `src/ai-schema.ts`                             | Zod contracts, batch limits and evidence/ID validation                  |
+| `src/ai.ts`                                    | Batching, deduplication, client requests and protected edit application |
+| `src/components/AiReview.tsx`                  | Column preview, progress and suggestion review                          |
+| `src/main.tsx`                                 | Inventory workflow and selected rows                                    |
+| `server/ai.ts`                                 | Authenticated, bounded OpenAI request using the official SDK            |
+| `vite.config.ts`, `server/node-adapter.ts`     | Local API integration                                                   |
+| `scripts/build-worker.mjs`, `scripts/serve.ts` | Deployment packaging and local production preview                       |
 
-- Fuzzy matching recognizes spelling differences, not arbitrary synonyms or meaning. Unfamiliar column terminology may need manual mapping.
-- Product/brand inference from a combined description has limited vocabulary. Explicit manufacturer/model columns accept arbitrary values.
-- Combined-value parsing assumes common specification ordering when capacities are unlabeled. More unusual arrangements can need correction. Values are never looked up from a product catalogue.
-- One table layout per sheet is supported. Headers beyond the initial detection region, transposed inventories and headerless files require preparation or manual selection. The header-row dropdown includes all rows for manual recovery.
-- Blank cells stay blank; incomplete records remain visible when at least one mapped specification is available. Totals and repeated headers are skipped.
-- Files are limited to 15 MB and sheets to 50,000 rows / 500 columns. Parsing runs on the main thread. Decompression happens before row limits are checked, so hostile zip archives are outside this prototype's protection.
-- The npm `xlsx` package has a known high-severity advisory. Review the maintained SheetJS distribution before production use. Static deployment does not remove spreadsheet-parser risks.
-- Fonts are requested from Google Fonts; spreadsheet contents are not sent there. No application request sends file data or headers to an external service.
+## Validation and limits
 
-## AI assistance
+Parser tests cover both supplied files and an unseen generated workbook, CPU/model boundary regressions, RAM/storage separation, labeled capacities in either order, unknown manufacturers, leading-zero serials, unknown columns, edits and CSV escaping. AI tests use mocked provider responses to check the actual SDK request, strict output format, arbitrary keys, batch size/deduplication, reordered IDs, evidence rejection, partial failures, cancellation, existing edits, missing credentials, rate limits, incomplete responses, refusal and error redaction.
 
-OpenAI Codex assisted with implementation, UI styling, tests and documentation. No AI model runs inside the application. An earlier cloud-embedding experiment was removed to keep deployment and the extraction workflow small and predictable.
+Mocked tests verify integration, not real-model extraction quality. A live evaluation requires your key and representative held-out spreadsheets. Browser interaction testing is separate from parser/API tests.
+
+Local parsing supports one table layout per sheet, common specification ordering and a limited product vocabulary. Unfamiliar meanings may need manual mapping or optional AI. Headerless/transposed inventories and multiple tables with different schemas need preparation. Files are limited to 15 MB and sheets to 50,000 rows / 500 columns; parsing is on the main thread and row limits run after decompression. Hostile zip archives remain outside this prototype's protection. The npm `xlsx` package has a known high-severity advisory; evaluate the maintained SheetJS distribution before production use.
+
+Fonts are fetched from Google Fonts. Local mode does not send spreadsheet contents to external services. AI mode sends only selected cell names/values and row IDs through the server to OpenAI; the application does not log or persist these cells, but its provider's policies apply.
+
+## AI assistance disclosure
+
+OpenAI Codex assisted with implementation, styling, tests and documentation. The optional runtime LLM uses OpenAI Responses with schema-constrained output. Local parsing remains independent; there is no embedding layer or automatic AI processing on upload.

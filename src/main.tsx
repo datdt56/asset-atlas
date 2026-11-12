@@ -17,6 +17,7 @@ import {
   Server,
   ArrowRight,
   AlertCircle,
+  Sparkles,
 } from "lucide-react";
 import {
   extract,
@@ -29,17 +30,11 @@ import {
   type Field,
 } from "./extract";
 import { resolveHeaders, checkConflicts } from "./mapping/resolve";
+import { fieldLabels as labels } from "./asset-fields";
+import { AI_SELECTION_LIMIT } from "./ai-schema";
+import { buildAiEdits } from "./ai";
+import { AiReview, type AiSelection } from "./components/AiReview";
 import "./style.css";
-const labels: Record<Field, string> = {
-  type: "Asset type",
-  manufacturer: "Manufacturer",
-  model: "Model",
-  serial: "Serial number",
-  cpu: "CPU",
-  ram: "RAM",
-  storage: "Storage",
-  screen: "Screen size",
-};
 function App() {
   const [sheets, setSheets] = useState<Sheet[]>([]),
     [filename, setFilename] = useState(""),
@@ -53,6 +48,29 @@ function App() {
     [drag, setDrag] = useState(false),
     [menu, setMenu] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [aiRows, setAiRows] = useState<Asset[] | null>(null);
+  function applyAi(selections: AiSelection[]) {
+    setEdits((current) => {
+      const next = { ...current };
+      for (const selection of selections) {
+        const asset = assets.find(
+          (asset) => asset.id === selection.suggestion.id,
+        );
+        if (asset)
+          next[asset.id] = buildAiEdits(
+            asset,
+            current[asset.id] || {},
+            selection.suggestion,
+            selection.fields,
+          );
+      }
+      return next;
+    });
+    setAiRows(null);
+    setCheckedIds(new Set());
+  }
+
   const unresolvedCount = sheets
     .filter((s) => s.enabled)
     .reduce(
@@ -89,6 +107,8 @@ function App() {
       const data = readWorkbook(await file.arrayBuffer());
       if (!data.some((s) => s.rows.length))
         throw Error("The file contains no readable rows.");
+      setAiRows(null);
+      setCheckedIds(new Set());
       setSheets(data);
       setFilename(file.name);
       setEdits({});
@@ -150,6 +170,8 @@ function App() {
       )
     )
       return;
+    setAiRows(null);
+    setCheckedIds(new Set());
     setSheets((s) => s.map((v, i) => (i === index ? { ...v, ...value } : v)));
     setEdits({});
     setSelectedId(null);
@@ -199,10 +221,10 @@ function App() {
         <div className="aside-bottom">
           <div className="privacy">
             <ShieldCheck size={20} />
-            <strong>Asset rows stay local</strong>
+            <strong>Local by default</strong>
             <p>
-              Spreadsheets are processed in your browser. Files and asset data
-              stay on this device.
+              Local parsing stays on this device. Optional AI sends only cells
+              you explicitly select to OpenAI.
             </p>
           </div>
         </div>
@@ -360,6 +382,18 @@ function App() {
                 </p>
               </div>
               <div className="actions">
+                <button
+                  className="secondary"
+                  disabled={!checkedIds.size}
+                  onClick={() =>
+                    setAiRows(
+                      assets.filter((asset) => checkedIds.has(asset.id)),
+                    )
+                  }
+                >
+                  <Sparkles size={15} />
+                  AI review ({checkedIds.size})
+                </button>
                 <button
                   className="secondary"
                   disabled={!sheets.length}
@@ -568,6 +602,37 @@ function App() {
                   <table>
                     <thead>
                       <tr>
+                        <th>
+                          <input
+                            type="checkbox"
+                            aria-label="Select up to 100 visible rows for AI review"
+                            checked={
+                              visible.length > 0 &&
+                              visible
+                                .slice(0, AI_SELECTION_LIMIT)
+                                .every((asset) => checkedIds.has(asset.id))
+                            }
+                            onChange={(event) =>
+                              setCheckedIds((current) =>
+                                event.target.checked
+                                  ? new Set(
+                                      [
+                                        ...current,
+                                        ...visible.map((asset) => asset.id),
+                                      ].slice(0, AI_SELECTION_LIMIT),
+                                    )
+                                  : new Set(
+                                      [...current].filter(
+                                        (id) =>
+                                          !visible.some(
+                                            (asset) => asset.id === id,
+                                          ),
+                                      ),
+                                    ),
+                              )
+                            }
+                          />
+                        </th>
                         <th>ASSET / MODEL</th>
                         <th>TYPE</th>
                         <th>SERIAL NUMBER</th>
@@ -588,6 +653,28 @@ function App() {
                             if (e.key === "Enter") setSelectedId(a.id);
                           }}
                         >
+                          <td
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${a.model || a.id} for AI review`}
+                              checked={checkedIds.has(a.id)}
+                              disabled={
+                                !checkedIds.has(a.id) &&
+                                checkedIds.size >= AI_SELECTION_LIMIT
+                              }
+                              onChange={(event) =>
+                                setCheckedIds((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked) next.add(a.id);
+                                  else next.delete(a.id);
+                                  return next;
+                                })
+                              }
+                            />
+                          </td>
                           <td>
                             <div className="asset-cell">
                               <span className="device-icon">
@@ -650,7 +737,10 @@ function App() {
                 </div>
                 <div className="table-footer">
                   Showing {visible.length} of {assets.length} assets
-                  <span>Source cells retained for extracted assets</span>
+                  <span>
+                    Source cells retained · Select up to 100 rows for optional
+                    AI review
+                  </span>
                 </div>
               </>
             )}
@@ -663,6 +753,14 @@ function App() {
           </footer>
         </div>
       </main>
+      {aiRows && (
+        <AiReview
+          rows={aiRows}
+          edits={edits}
+          onClose={() => setAiRows(null)}
+          onApply={applyAi}
+        />
+      )}
       {selected && (
         <div className="overlay" onClick={() => setSelectedId(null)}>
           <section

@@ -1,65 +1,60 @@
-# Simple local-first implementation
+# Local parsing with optional batch AI assistance
 
 ## Scope
 
-Build a complete, explainable coding-challenge submission using React, TypeScript
-and two libraries: SheetJS for spreadsheet reading, Fuzzball.js for header typos.
-Keep a single processing path and manual correction for uncertain cases.
+Keep the local parser as the default and add one optional LLM path for unfamiliar
+columns and difficult descriptions. No embedding layer or automatic cloud call on
+upload. User-selected original cells are the AI input; canonical fields are output.
 
 ```text
-Upload → read every sheet → find header row → map columns
-       → parse/normalize specifications → review → export
+Upload → local parsing → inventory/review/export
+                           ↓ select rows
+                Preview selected source columns
+                           ↓ explicit send
+                  Batch LLM interpretation
+                           ↓
+                  Review and apply changes
 ```
-
-There is no embedding layer, LLM integration, server API, database or API key.
-The build is a static site. No custom string-distance algorithm is needed.
 
 ## Implemented
 
-- [x] Read XLSX/CSV with SheetJS; preserve source cells and sheet/row references.
-- [x] Detect headers within the first 50 rows independently for each sheet.
-- [x] Normalize headers and try a small alias dictionary, then Fuzzball.js `ratio`.
-- [x] Accept fuzzy matches at 82/100 only when they lead the next field by 10 points.
-      Unknown acronyms and ambiguous matches remain available for correction.
-- [x] Keep column decisions as the single source of truth; remove parallel mapping state.
-- [x] Automatically ignore common administrative columns while retaining source values.
-- [x] Extract the eight requested fields from explicit columns and common combined specs.
-- [x] Preserve unfamiliar brands and leading-zero serials in explicit columns.
-- [x] Fix CPU token boundaries, RAM/storage duplication, and lone-capacity guessing.
-- [x] Support common memory units and preserve disk counts and media.
-- [x] Keep incomplete assets visible and recompute review warnings after edits.
-- [x] Retain mapping repair, sheet selection, search, source inspection and CSV/JSON export.
-- [x] Remove the cloud client, API handler, secret placeholder and Worker build plumbing.
-- [x] Test both supplied files and unseen synthetic variations, including field-level regressions.
+- [x] SheetJS + React + TypeScript; local multi-sheet parsing and provenance.
+- [x] Header aliases + Fuzzball.js; small normalization/description helpers.
+- [x] Separate normalization, description parsing and row assembly.
+- [x] Editable inventory, mapping repair, source inspection and CSV/JSON exports.
+- [x] Keep unknown-column rows available for manual or AI review.
+- [x] Select up to 100 rows and choose which original columns to send.
+- [x] Exclude known serial/administrative fields by default; allow unfamiliar keys.
+- [x] Preview the exact request and send only after explicit user action.
+- [x] Deduplicate identical selected inputs and batch up to 20 unique rows/request.
+- [x] Bound total request size; validate all batches before a paid call.
+- [x] Official OpenAI SDK + Zod Structured Outputs; nullable values and quoted evidence.
+- [x] Validate source evidence and exact/unique IDs on both sides.
+- [x] Review before/after values and apply only selected fields.
+- [x] Protect existing edits; explicit source values are unselected by default.
+- [x] Keep local results and completed suggestions on cancellation/partial failure.
+- [x] Keep keys server-side with placeholder-only `.env.example`.
+- [x] Hosted identity checks, request limits, timeout, no automatic retries and redacted errors.
 
-## Keep it simple
+## Keep the scope bounded
 
-Use the existing small modules: `extract.ts`, `parse.ts`, `mapping/fields.ts`,
-`mapping/resolve.ts`, `main.tsx` and `style.css`. Prefer straightforward matching
-and a few documented domain rules over additional detection layers or services.
+One model, one endpoint, two user choices: what data to send and what changes to
+apply. Do not add vector search, model routing, persistent caches, automatic
+escalation or new background services.
 
-A field alias dictionary is expected domain knowledge, not a complete list of
-possible headers. Fuzzy matching handles spelling differences; manual mapping
-handles unfamiliar meanings. Brand dictionaries are only hints for descriptions,
-never a whitelist for explicit manufacturer values.
+Default model: `gpt-6-luna` with reasoning disabled. `LLM_MODEL` is a server-only
+configuration setting for a compatible model. No key is needed for local parsing.
+Secrets go in ignored `.env.local` locally or runtime secret storage in production.
 
-## Simple function responsibilities
+## Verification before presenting
 
-- [x] `normalizeMemory`: only converts explicit units; bare numbers need a unit from the header.
-- [x] `normalizeScreen`: normalizes inches without relabeling centimetres.
-- [x] `classifyAssetType`: a small rule lookup rather than nested conditionals.
-- [x] `parseDescription`: parses combined specifications and returns values/warnings.
-- [x] `extractRow`: preserves explicit values and merges only missing parsed fields.
-- [x] `extract`: coordinates sheets and rows without embedding specification parsing.
-- [x] Prefer explicit RAM/storage labels before conventional positional inference.
+- [ ] Evaluate real model output on held-out spreadsheets using your key.
+- [ ] Test the complete browser flow: select rows, inspect payload, send, cancel,
+      review source evidence, apply selected changes, edit again and export.
+- [ ] Confirm malformed/missing credentials leave local processing usable.
+- [ ] Measure actual latency and token usage before making cost/quality claims.
+- [ ] Review dependency advisories and shared rate/budget enforcement before public production use.
 
-## Before presenting
-
-- [ ] Manually test drag/drop, XLSX and CSV uploads, source inspection, edits,
-      mapping repair, excluded sheets, search and both export formats.
-- [ ] Demonstrate a file with renamed/reordered columns and headers below title rows.
-- [ ] Explain limited synonym/product coverage and one-table-per-sheet support.
-- [ ] Review spreadsheet dependency advisories before production use.
-
-Run `npm test`, `npm run format:check` and `npm run build`. Browser QA should be
-reported separately; passing parser tests does not prove every UI interaction.
+Run `npm test`, `npm run format:check`, and `npm run build`. Automated mocked-provider
+tests establish request/response handling, not semantic accuracy. Record browser
+QA and live-model evaluation separately.

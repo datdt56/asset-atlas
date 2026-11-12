@@ -10,17 +10,8 @@ import {
   classifyAssetType,
   parseDescription,
 } from "./parse";
-export const fields = [
-  "type",
-  "manufacturer",
-  "model",
-  "serial",
-  "cpu",
-  "ram",
-  "storage",
-  "screen",
-] as const;
-export type Field = (typeof fields)[number];
+import { fields, type AssetValues, type Field } from "./asset-fields";
+export { fields, type Field, type AssetValues } from "./asset-fields";
 export interface Sheet {
   name: string;
   rows: string[][];
@@ -29,7 +20,6 @@ export interface Sheet {
   decisions: HeaderDecision[];
   headerConfirmed: boolean;
 }
-export type AssetValues = Record<Field, string>;
 export interface Asset extends AssetValues {
   id: string;
   sheet: string;
@@ -148,7 +138,13 @@ export function extract(sheets: Sheet[]): Asset[] {
       ).length;
       if (repeatedHeaders >= 2) return;
       const asset = extractRow(sheet, row, sheet.header + offset + 2);
-      if (fields.some((field) => asset[field])) assets.push(asset);
+      const hasUnmappedData = sheet.decisions.some(
+        (decision) =>
+          decision.status === "unresolved" &&
+          clean(row[decision.columnIndex] || ""),
+      );
+      if (fields.some((field) => asset[field]) || hasUnmappedData)
+        assets.push(asset);
     });
   }
   return reviewAssets(assets);
